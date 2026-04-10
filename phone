@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>BLE Tester Phone Helper</title>
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<style>
+body { background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; padding:14px; margin:0; }
+h2 { margin:0 0 12px 0; }
+.card { background:#1e293b; padding:14px; border-radius:12px; margin-bottom:12px; }
+button { padding:12px 14px; border:none; border-radius:8px; background:#3b82f6; color:#fff; cursor:pointer; margin:4px 6px 4px 0; font-size:15px; }
+button.secondary { background:#475569; }
+button.success { background:#16a34a; }
+button.warn { background:#d97706; }
+input { width:100%; box-sizing:border-box; padding:10px; border:none; border-radius:8px; margin:8px 0; font-size:16px; }
+.small { color:#94a3b8; font-size:12px; line-height:1.45; }
+.hidden { display:none !important; }
+.value { font-family:monospace; font-size:28px; letter-spacing:2px; color:#93c5fd; word-break:break-all; }
+#scannerWrap { position:relative; overflow:hidden; border-radius:12px; background:#000; }
+#scannerVideo { width:100%; max-height:52vh; background:#000; display:block; object-fit:cover; }
+#scanOverlay { position:absolute; inset:0; pointer-events:none; display:flex; align-items:center; justify-content:center; }
+#scanBox { width:72%; height:34%; border:3px solid rgba(59,130,246,0.9); border-radius:16px; box-shadow:0 0 0 9999px rgba(0,0,0,0.28); }
+.diagGrid { display:grid; grid-template-columns: auto 1fr; gap:6px 10px; font-size:13px; }
+.diagGrid div:nth-child(odd) { color:#94a3b8; }
+.ok { color:#22c55e; }
+.bad { color:#ef4444; }
+.warnText { color:#f59e0b; }
+</style>
+</head>
+<body>
+<h2>Phone Helper</h2>
+
+<div class="card">
+  <div>Connection: <span id="connStatus">Not linked</span></div>
+  <div>PC Code:</div>
+  <div id="pcCode" class="value">------</div>
+  <button id="scanPcQrBtn">Scan PC QR</button>
+  <button id="manualPcCodeBtn" class="secondary">Type PC Code</button>
+  <div id="manualPcWrap" class="hidden">
+    <input id="manualPcCodeInput" placeholder="Enter 6-character PC code">
+    <button id="connectManualBtn">Connect</button>
+  </div>
+  <div class="small">Best result: open this page directly in Android Chrome. Do not open it inside Gmail, Drive preview, WhatsApp, or another in-app viewer.</div>
+</div>
+
+<div class="card">
+  <div id="cameraStatus">Camera: not started</div>
+  <div id="scanStatus" class="small">Ready.</div>
+  <div class="diagGrid" style="margin-top:10px;">
+    <div>Secure context</div><div id="diagSecure">-</div>
+    <div>mediaDevices</div><div id="diagMedia">-</div>
+    <div>BarcodeDetector</div><div id="diagBarcode">-</div>
+    <div>Web NFC</div><div id="diagNfc">-</div>
+    <div>Browser</div><div id="diagBrowser">-</div>
+  </div>
+</div>
+
+<div class="card hidden" id="barcodeTaskCard">
+  <h3 style="margin-top:0;">Barcode Request</h3>
+  <div id="barcodePrompt">The PC is waiting for a barcode.</div>
+  <button id="scanBarcodeBtn">Start Live Barcode Scan</button>
+  <button id="manualBarcodeBtn" class="secondary">Type Barcode</button>
+  <div id="manualBarcodeWrap" class="hidden">
+    <input id="manualBarcodeInput" placeholder="Enter barcode">
+    <button id="sendManualBarcodeBtn">Send Barcode</button>
+  </div>
+</div>
+
+<div class="card hidden" id="nfcTaskCard">
+  <h3 style="margin-top:0;">NFC Request</h3>
+  <div>Write this BLE ID to the NFC tag:</div>
+  <div id="nfcSerial" class="value">------</div>
+  <button id="writeNfcBtn" class="success">Write NFC</button>
+  <div id="nfcHelp" class="small">Tap the button, then place the phone on the NFC tag.</div>
+</div>
+
+<div class="card hidden" id="scannerCard">
+  <h3 style="margin-top:0;" id="scannerTitle">Scanner</h3>
+  <div id="scannerWrap">
+    <video id="scannerVideo" playsinline autoplay muted></video>
+    <div id="scanOverlay"><div id="scanBox"></div></div>
+  </div>
+  <div class="small" id="scannerHint" style="margin-top:8px;">Point the camera at the code.</div>
+  <button id="stopScannerBtn" class="secondary">Stop Scanner</button>
+</div>
+
+<script>
+let peer = null;
+let conn = null;
+let currentRequestId = "";
+let currentScanMode = "";
+let videoStream = null;
+let scanLoopTimer = null;
+let detector = null;
+const videoEl = document.getElementById("scannerVideo");
+
+function $(id) { return document.getElementById(id); }
+function show(id) { $(id).classList.remove("hidden"); }
+function hide(id) { $(id).classList.add("hidden"); }
+function setConnStatus(text) { $("connStatus").innerText = text; }
+function setScanStatus(text, cls="") { const el = $("scanStatus"); el.className = "small" + (cls ? " " + cls : ""); el.innerText = text; }
+function setCameraStatus(text) { $("cameraStatus").innerText = "Camera: " + text; }
+
+function normalizePcCode(raw) {
+  return String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+}
+
+function rememberPcCode(code) {
+  localStorage.setItem("blePhonePcCode", code);
+  $("pcCode").innerText = code || "------";
+}
+
+function browserInfo() {
+  const ua = navigator.userAgent || "";
+  const isAndroid = /Android/i.test(ua);
+  const isChrome = /Chrome\//i.test(ua) && !/EdgA\//i.test(ua) && !/OPR\//i.test(ua);
+  const inApp = /wv|FBAN|FBAV|Instagram|Line\//i.test(ua);
+  return { ua, isAndroid, isChrome, inApp };
+}
+
+function refreshDiagnostics() {
+  const b = browserInfo();
+  $("diagSecure").innerHTML = isSecureContext ? '<span class="ok">Yes</span>' : '<span class="bad">No</span>';
+  $("diagMedia").innerHTML = (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) ? '<span class="ok">Available</span>' : '<span class="bad">Missing</span>';
+  $("diagBarcode").innerHTML = ("BarcodeDetector" in window) ? '<span class="ok">Available</span>' : '<span class="bad">Missing</span>';
+  $("diagNfc").innerHTML = ("NDEFReader" in window) ? '<span class="ok">Available</span>' : '<span class="warnText">Not available here</span>';
+  $("diagBrowser").innerHTML = `${b.isAndroid ? 'Android' : 'Non-Android'} / ${b.isChrome ? 'Chrome-like' : 'Other browser'}${b.inApp ? ' / In-app browser' : ''}`;
+}
+
+function connectToPcCode(code) {
+  code = normalizePcCode(code);
+  if (!code) {
+    alert("Invalid PC code.");
+    return;
+  }
+  rememberPcCode(code);
+
+  if (peer) {
+    try { peer.destroy(); } catch (e) {}
+    peer = null;
+    conn = null;
+  }
+
+  const phoneId = "bleph-" + Math.random().toString(36).slice(2, 8);
+  peer = new Peer(phoneId);
+
+  peer.on("open", () => {
+    const pcPeerId = "blepc-" + code;
+    conn = peer.connect(pcPeerId, { reliable: true });
+
+    conn.on("open", () => {
+      setConnStatus("Linked");
+      setScanStatus("Linked to PC.", "ok");
+      conn.send({ type: "phone_status", text: "Phone linked" });
+    });
+
+    conn.on("data", handlePcMessage);
+
+    conn.on("close", () => {
+      setConnStatus("Disconnected");
+      setScanStatus("Connection closed.", "warnText");
+      conn = null;
+    });
+
+    conn.on("error", (err) => {
+      console.error(err);
+      setConnStatus("Connection error");
+      setScanStatus("Connection error: " + (err.message || err), "bad");
+    });
+  });
+
+  peer.on("error", (err) => {
+    console.error(err);
+    setConnStatus("Peer error");
+    setScanStatus("Peer error: " + (err.message || err), "bad");
+  });
+
+  setConnStatus("Connecting...");
+  setScanStatus("Connecting to PC...", "warnText");
+}
+
+function handlePcMessage(data) {
+  if (!data || typeof data !== "object") return;
+
+  if (data.type === "hello_from_pc") {
+    setConnStatus("Linked");
+    return;
+  }
+
+  if (data.type === "request_barcode") {
+    currentRequestId = data.requestId || "";
+    show("barcodeTaskCard");
+    hide("nfcTaskCard");
+    alert("PC is waiting for a barcode. Tap Start Live Barcode Scan.");
+    return;
+  }
+
+  if (data.type === "request_nfc") {
+    currentRequestId = data.requestId || "";
+    $("nfcSerial").innerText = data.serial || "";
+    show("nfcTaskCard");
+    hide("barcodeTaskCard");
+    alert("PC is waiting for NFC. Tap Write NFC.");
+    return;
+  }
+}
+
+async function requestRearCameraStream() {
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+    throw new Error("This browser does not expose mediaDevices.getUserMedia.");
+  }
+
+  const firstTry = {
+    audio: false,
+    video: {
+      facingMode: { ideal: "environment" },
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    }
+  };
+
+  try {
+    return await navigator.mediaDevices.getUserMedia(firstTry);
+  } catch (e) {
+    const fallback = {
+      audio: false,
+      video: true
+    };
+    return await navigator.mediaDevices.getUserMedia(fallback);
+  }
+}
+
+async function startScanner(mode) {
+  refreshDiagnostics();
+  currentScanMode = mode;
+  show("scannerCard");
+  $("scannerTitle").innerText = mode === "pcqr" ? "Scan PC QR" : "Live Barcode Scan";
+  $("scannerHint").innerText = mode === "pcqr"
+    ? "Point the camera at the PC QR code."
+    : "Point the camera at the barcode until it is detected.";
+
+  if (!("BarcodeDetector" in window)) {
+    setScanStatus("BarcodeDetector is not available in this browser. Use Android Chrome.", "bad");
+    throw new Error("BarcodeDetector is not available in this browser.");
+  }
+
+  await stopScanner();
+
+  try {
+    setCameraStatus("requesting permission...");
+    setScanStatus("Requesting camera permission...", "warnText");
+    videoStream = await requestRearCameraStream();
+    videoEl.srcObject = videoStream;
+    await videoEl.play();
+    setCameraStatus("live");
+    setScanStatus("Camera started. Scanning live...", "ok");
+  } catch (e) {
+    const b = browserInfo();
+    let msg = e && e.message ? e.message : String(e);
+    if (e && (e.name === "NotAllowedError" || e.name === "PermissionDeniedError")) {
+      msg = "Camera permission was denied. Open this file in Android Chrome itself, then allow Camera when prompted.";
+      if (b.inApp) msg += " It looks like you may be in an in-app browser.";
+    }
+    setCameraStatus("failed");
+    setScanStatus(msg, "bad");
+    throw new Error(msg);
+  }
+
+  const formats = mode === "pcqr"
+    ? ["qr_code"]
+    : ["code_128", "code_39", "code_93", "codabar", "ean_13", "ean_8", "upc_a", "upc_e", "itf", "qr_code"];
+
+  detector = new BarcodeDetector({ formats });
+  runScanLoop();
+}
+
+function runScanLoop() {
+  clearTimeout(scanLoopTimer);
+  scanLoopTimer = setTimeout(async () => {
+    if (!detector || !videoStream || videoEl.readyState < 2) {
+      runScanLoop();
+      return;
+    }
+
+    try {
+      const barcodes = await detector.detect(videoEl);
+      if (barcodes && barcodes.length) {
+        const raw = String(barcodes[0].rawValue || "").trim();
+        if (raw) {
+          await onScanSuccess(raw);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("detect failed", e);
+    }
+
+    runScanLoop();
+  }, 120);
+}
+
+async function stopScanner() {
+  clearTimeout(scanLoopTimer);
+  scanLoopTimer = null;
+  detector = null;
+
+  if (videoEl.srcObject) {
+    try {
+      const tracks = videoEl.srcObject.getTracks();
+      tracks.forEach(track => track.stop());
+    } catch (e) {}
+  }
+  if (videoStream) {
+    try { videoStream.getTracks().forEach(track => track.stop()); } catch (e) {}
+  }
+  videoStream = null;
+  videoEl.srcObject = null;
+  hide("scannerCard");
+  setCameraStatus("not started");
+}
+
+async function onScanSuccess(text) {
+  const raw = String(text || "").trim();
+  await stopScanner();
+
+  if (currentScanMode === "pcqr") {
+    const m = raw.match(/^BLEPC:(blepc-([A-Z0-9]{6}))$/i);
+    if (!m) {
+      setScanStatus("That QR is not a valid PC link QR.", "bad");
+      alert("That QR is not a valid PC link QR.");
+      return;
+    }
+    setScanStatus("PC QR read. Linking now...", "ok");
+    connectToPcCode(m[2]);
+    return;
+  }
+
+  if (currentScanMode === "barcode") {
+    setScanStatus("Barcode detected: " + raw, "ok");
+    sendBarcodeResult(raw);
+  }
+}
+
+function sendBarcodeResult(barcode) {
+  barcode = String(barcode || "").trim();
+  if (!barcode) {
+    alert("Barcode is empty.");
+    return;
+  }
+  if (!conn || !conn.open) {
+    alert("Phone is not linked.");
+    return;
+  }
+  conn.send({ type: "barcode_result", requestId: currentRequestId, ok: true, barcode });
+  hide("barcodeTaskCard");
+  hide("manualBarcodeWrap");
+  $("manualBarcodeInput").value = "";
+  alert("Barcode sent to PC.");
+}
+
+async function writeNfcNow() {
+  const serial = String($("nfcSerial").innerText || "").trim();
+  if (!serial) {
+    alert("No BLE ID to write.");
+    return;
+  }
+  if (!conn || !conn.open) {
+    alert("Phone is not linked.");
+    return;
+  }
+
+  if (!('NDEFReader' in window)) {
+    conn.send({ type: 'nfc_result', requestId: currentRequestId, ok: false, error: 'Web NFC is not available on this phone/browser.' });
+    alert('Web NFC is not available on this phone/browser. Open the page in Android Chrome on a supported phone.');
+    return;
+  }
+
+  try {
+    const ndef = new NDEFReader();
+    await ndef.write({ records: [{ recordType: 'text', data: serial }] });
+    conn.send({ type: 'nfc_result', requestId: currentRequestId, ok: true, message: 'NFC written' });
+    hide('nfcTaskCard');
+    alert('NFC write completed.');
+  } catch (e) {
+    console.error(e);
+    conn.send({ type: 'nfc_result', requestId: currentRequestId, ok: false, error: e.message || String(e) });
+    alert('NFC write failed: ' + (e.message || e));
+  }
+}
+
+$("scanPcQrBtn").onclick = () => startScanner("pcqr").catch(e => alert("Scanner failed: " + (e.message || e)));
+$("manualPcCodeBtn").onclick = () => show("manualPcWrap");
+$("connectManualBtn").onclick = () => connectToPcCode($("manualPcCodeInput").value);
+$("scanBarcodeBtn").onclick = () => startScanner("barcode").catch(e => alert("Scanner failed: " + (e.message || e)));
+$("manualBarcodeBtn").onclick = () => show("manualBarcodeWrap");
+$("sendManualBarcodeBtn").onclick = () => sendBarcodeResult($("manualBarcodeInput").value);
+$("writeNfcBtn").onclick = writeNfcNow;
+$("stopScannerBtn").onclick = stopScanner;
+
+(function init() {
+  refreshDiagnostics();
+  const remembered = normalizePcCode(localStorage.getItem("blePhonePcCode") || "");
+  if (remembered) rememberPcCode(remembered);
+  const b = browserInfo();
+  if (b.inApp) {
+    setScanStatus("This looks like an in-app browser. Open this file in Android Chrome for live scanning.", "warnText");
+  }
+})();
+</script>
+</body>
+</html>
