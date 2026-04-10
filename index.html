@@ -207,7 +207,12 @@ function handlePcMessage(data) {
     currentRequestId = data.requestId || "";
     show("barcodeTaskCard");
     hide("nfcTaskCard");
-    alert("PC is waiting for a barcode. Tap Start Live Barcode Scan.");
+    setScanStatus("PC requested barcode scan. Opening live scanner...", "warnText");
+    startScanner("barcode").catch(e => {
+      const msg = e && e.message ? e.message : String(e);
+      setScanStatus(msg, "bad");
+      alert("Live barcode scan failed: " + msg);
+    });
     return;
   }
 
@@ -249,6 +254,7 @@ async function requestRearCameraStream() {
 async function startScanner(mode) {
   refreshDiagnostics();
   currentScanMode = mode;
+  await stopScanner(false);
   show("scannerCard");
   document.body.classList.add("scanner-open");
   $("scannerTitle").innerText = mode === "pcqr" ? "Scan PC QR" : "Live Barcode Scan";
@@ -263,7 +269,6 @@ async function startScanner(mode) {
   }
 
   setCameraStatus("detected");
-  await stopScanner();
 
   try {
     setCameraStatus("requesting permission...");
@@ -320,7 +325,7 @@ function runScanLoop() {
   }, 120);
 }
 
-async function stopScanner() {
+async function stopScanner(hideUi = true) {
   clearTimeout(scanLoopTimer);
   scanLoopTimer = null;
   detector = null;
@@ -336,9 +341,13 @@ async function stopScanner() {
   }
   videoStream = null;
   videoEl.srcObject = null;
-  hide("scannerCard");
-  document.body.classList.remove("scanner-open");
-  setCameraStatus("not started");
+  if (hideUi) {
+    hide("scannerCard");
+    document.body.classList.remove("scanner-open");
+    setCameraStatus("not started");
+  } else {
+    setCameraStatus("resetting");
+  }
 }
 
 async function onScanSuccess(text) {
