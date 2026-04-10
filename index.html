@@ -17,10 +17,18 @@ input { width:100%; box-sizing:border-box; padding:10px; border:none; border-rad
 .small { color:#94a3b8; font-size:12px; line-height:1.45; }
 .hidden { display:none !important; }
 .value { font-family:monospace; font-size:28px; letter-spacing:2px; color:#93c5fd; word-break:break-all; }
-#scannerWrap { position:relative; overflow:hidden; border-radius:12px; background:#000; }
-#scannerVideo { width:100%; max-height:52vh; background:#000; display:block; object-fit:cover; }
+#scannerCard { position:fixed; inset:0; z-index:9999; background:#000; padding:0; border-radius:0; margin:0; }
+#scannerTopBar { position:absolute; top:0; left:0; right:0; z-index:3; padding:12px 14px; background:linear-gradient(to bottom, rgba(0,0,0,0.72), rgba(0,0,0,0.18)); }
+#scannerTitle { margin:0 0 6px 0; }
+#scannerWrap { position:absolute; inset:0; overflow:hidden; background:#000; }
+#scannerVideo { width:100%; height:100%; background:#000; display:block; object-fit:cover; }
 #scanOverlay { position:absolute; inset:0; pointer-events:none; display:flex; align-items:center; justify-content:center; }
-#scanBox { width:72%; height:34%; border:3px solid rgba(59,130,246,0.9); border-radius:16px; box-shadow:0 0 0 9999px rgba(0,0,0,0.28); }
+#scanBox { width:min(82vw,420px); height:min(34vh,220px); border:3px solid rgba(59,130,246,0.95); border-radius:16px; box-shadow:0 0 0 9999px rgba(0,0,0,0.28); }
+#scannerBottomBar { position:absolute; left:0; right:0; bottom:0; z-index:3; padding:12px 14px calc(18px + env(safe-area-inset-bottom)); background:linear-gradient(to top, rgba(0,0,0,0.78), rgba(0,0,0,0.18)); }
+#scannerHint { margin:0 0 10px 0; }
+.scannerButtons { display:flex; gap:8px; flex-wrap:wrap; }
+.scannerButtons button { margin:0; flex:1; min-width:120px; }
+body.scanner-open { overflow:hidden; }
 .diagGrid { display:grid; grid-template-columns: auto 1fr; gap:6px 10px; font-size:13px; }
 .diagGrid div:nth-child(odd) { color:#94a3b8; }
 .ok { color:#22c55e; }
@@ -76,13 +84,20 @@ input { width:100%; box-sizing:border-box; padding:10px; border:none; border-rad
 </div>
 
 <div class="card hidden" id="scannerCard">
-  <h3 style="margin-top:0;" id="scannerTitle">Scanner</h3>
   <div id="scannerWrap">
     <video id="scannerVideo" playsinline autoplay muted></video>
     <div id="scanOverlay"><div id="scanBox"></div></div>
   </div>
-  <div class="small" id="scannerHint" style="margin-top:8px;">Point the camera at the code.</div>
-  <button id="stopScannerBtn" class="secondary">Stop Scanner</button>
+  <div id="scannerTopBar">
+    <h3 id="scannerTitle">Scanner</h3>
+    <div class="small" id="scannerLiveStatus">Opening camera...</div>
+  </div>
+  <div id="scannerBottomBar">
+    <div class="small" id="scannerHint">Point the camera at the code.</div>
+    <div class="scannerButtons">
+      <button id="stopScannerBtn" class="secondary">Stop Scanner</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -100,7 +115,7 @@ function show(id) { $(id).classList.remove("hidden"); }
 function hide(id) { $(id).classList.add("hidden"); }
 function setConnStatus(text) { $("connStatus").innerText = text; }
 function setScanStatus(text, cls="") { const el = $("scanStatus"); el.className = "small" + (cls ? " " + cls : ""); el.innerText = text; }
-function setCameraStatus(text) { $("cameraStatus").innerText = "Camera: " + text; }
+function setCameraStatus(text) { $("cameraStatus").innerText = "Camera: " + text; const el = $("scannerLiveStatus"); if (el) el.innerText = "Camera: " + text; }
 
 function normalizePcCode(raw) {
   return String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
@@ -235,16 +250,19 @@ async function startScanner(mode) {
   refreshDiagnostics();
   currentScanMode = mode;
   show("scannerCard");
+  document.body.classList.add("scanner-open");
   $("scannerTitle").innerText = mode === "pcqr" ? "Scan PC QR" : "Live Barcode Scan";
   $("scannerHint").innerText = mode === "pcqr"
-    ? "Point the camera at the PC QR code."
-    : "Point the camera at the barcode until it is detected.";
+    ? "Point the camera at the PC QR code inside the blue box."
+    : "Point the camera at the barcode inside the blue box.";
+  $("scannerLiveStatus").innerText = "Opening camera...";
 
   if (!("BarcodeDetector" in window)) {
     setScanStatus("BarcodeDetector is not available in this browser. Use Android Chrome.", "bad");
     throw new Error("BarcodeDetector is not available in this browser.");
   }
 
+  setCameraStatus("detected");
   await stopScanner();
 
   try {
@@ -252,6 +270,8 @@ async function startScanner(mode) {
     setScanStatus("Requesting camera permission...", "warnText");
     videoStream = await requestRearCameraStream();
     videoEl.srcObject = videoStream;
+    videoEl.setAttribute("playsinline", "true");
+    videoEl.muted = true;
     await videoEl.play();
     setCameraStatus("live");
     setScanStatus("Camera started. Scanning live...", "ok");
@@ -317,6 +337,7 @@ async function stopScanner() {
   videoStream = null;
   videoEl.srcObject = null;
   hide("scannerCard");
+  document.body.classList.remove("scanner-open");
   setCameraStatus("not started");
 }
 
