@@ -211,7 +211,6 @@ function handlePcMessage(data) {
     startScanner("barcode").catch(e => {
       const msg = e && e.message ? e.message : String(e);
       setScanStatus(msg, "bad");
-      alert("Live barcode scan failed: " + msg);
     });
     return;
   }
@@ -221,7 +220,7 @@ function handlePcMessage(data) {
     $("nfcSerial").innerText = data.serial || "";
     show("nfcTaskCard");
     hide("barcodeTaskCard");
-    alert("PC is waiting for NFC. Tap Write NFC.");
+    setScanStatus("PC requested NFC write. Present the tag to the phone and tap Write NFC.", "warnText");
     return;
   }
 }
@@ -358,7 +357,6 @@ async function onScanSuccess(text) {
     const m = raw.match(/^BLEPC:(blepc-([A-Z0-9]{6}))$/i);
     if (!m) {
       setScanStatus("That QR is not a valid PC link QR.", "bad");
-      alert("That QR is not a valid PC link QR.");
       return;
     }
     setScanStatus("PC QR read. Linking now...", "ok");
@@ -375,54 +373,55 @@ async function onScanSuccess(text) {
 function sendBarcodeResult(barcode) {
   barcode = String(barcode || "").trim();
   if (!barcode) {
-    alert("Barcode is empty.");
+    setScanStatus("Barcode is empty.", "bad");
     return;
   }
   if (!conn || !conn.open) {
-    alert("Phone is not linked.");
+    setScanStatus("Phone is not linked.", "bad");
     return;
   }
   conn.send({ type: "barcode_result", requestId: currentRequestId, ok: true, barcode });
   hide("barcodeTaskCard");
   hide("manualBarcodeWrap");
   $("manualBarcodeInput").value = "";
-  alert("Barcode sent to PC.");
+  setScanStatus("Barcode sent to PC.", "ok");
 }
 
 async function writeNfcNow() {
   const serial = String($("nfcSerial").innerText || "").trim();
   if (!serial) {
-    alert("No BLE ID to write.");
+    setScanStatus("No BLE ID to write.", "bad");
     return;
   }
   if (!conn || !conn.open) {
-    alert("Phone is not linked.");
+    setScanStatus("Phone is not linked.", "bad");
     return;
   }
 
   if (!('NDEFReader' in window)) {
     conn.send({ type: 'nfc_result', requestId: currentRequestId, ok: false, error: 'Web NFC is not available on this phone/browser.' });
-    alert('Web NFC is not available on this phone/browser. Open the page in Android Chrome on a supported phone.');
+    setScanStatus('Web NFC is not available on this phone/browser. Open the page in Android Chrome on a supported phone.', 'bad');
     return;
   }
 
   try {
+    setScanStatus('Writing NFC... Hold the tag close to the phone.', 'warnText');
     const ndef = new NDEFReader();
     await ndef.write({ records: [{ recordType: 'text', data: serial }] });
     conn.send({ type: 'nfc_result', requestId: currentRequestId, ok: true, message: 'NFC written' });
     hide('nfcTaskCard');
-    alert('NFC write completed.');
+    setScanStatus('NFC written and sent to PC.', 'ok');
   } catch (e) {
     console.error(e);
     conn.send({ type: 'nfc_result', requestId: currentRequestId, ok: false, error: e.message || String(e) });
-    alert('NFC write failed: ' + (e.message || e));
+    setScanStatus('NFC write failed: ' + (e.message || e), 'bad');
   }
 }
 
-$("scanPcQrBtn").onclick = () => startScanner("pcqr").catch(e => alert("Scanner failed: " + (e.message || e)));
+$("scanPcQrBtn").onclick = () => startScanner("pcqr").catch(e => setScanStatus("Scanner failed: " + (e.message || e), "bad"));
 $("manualPcCodeBtn").onclick = () => show("manualPcWrap");
 $("connectManualBtn").onclick = () => connectToPcCode($("manualPcCodeInput").value);
-$("scanBarcodeBtn").onclick = () => startScanner("barcode").catch(e => alert("Scanner failed: " + (e.message || e)));
+$("scanBarcodeBtn").onclick = () => startScanner("barcode").catch(e => setScanStatus("Scanner failed: " + (e.message || e), "bad"));
 $("manualBarcodeBtn").onclick = () => show("manualBarcodeWrap");
 $("sendManualBarcodeBtn").onclick = () => sendBarcodeResult($("manualBarcodeInput").value);
 $("writeNfcBtn").onclick = writeNfcNow;
