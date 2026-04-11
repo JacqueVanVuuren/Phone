@@ -207,16 +207,15 @@ function setInstallStatus(text, cls="") {
 
 function refreshInstallUi() {
   const btn = $("installAppBtn");
-  if (!btn) return;
+  const card = $("installCard");
+  if (!btn || !card) return;
   const b = browserInfo();
   const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
   if (standalone || navigator.standalone) {
-    btn.disabled = true;
-    btn.style.opacity = "0.65";
-    btn.style.cursor = "default";
-    setInstallStatus("Already installed or opened in app mode.", "ok");
+    hide("installCard");
     return;
   }
+  show("installCard");
   if (!b.isAndroid || !b.isChrome) {
     btn.disabled = true;
     btn.style.opacity = "0.65";
@@ -272,6 +271,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
 
 window.addEventListener('appinstalled', () => {
   deferredInstallPrompt = null;
+  hide("installCard");
   setInstallStatus("Installed successfully. You can launch it from the new scanner icon.", "ok");
   refreshInstallUi();
 });
