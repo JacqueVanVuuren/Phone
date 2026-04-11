@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Bar Code Scanner/NFC</title>
+
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Scanner NFC">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='110' fill='%230f172a'/%3E%3Cpath d='M150 118h60v26h-34v34h-26zm152 0h60v60h-26v-34h-34zm34 186h26v60h-60v-26h34zm-186 34h34v26h-60v-60h26z' fill='%2393c5fd'/%3E%3Crect x='122' y='196' width='268' height='120' rx='20' fill='none' stroke='%233b82f6' stroke-width='24'/%3E%3Cpath d='M166 220v72M202 220v72M238 220v72M292 220v72M328 220v72' stroke='%2393c5fd' stroke-width='16' stroke-linecap='round'/%3E%3Cpath d='M140 256h232' stroke='%233b82f6' stroke-width='12' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='110' fill='%230f172a'/%3E%3Cpath d='M150 118h60v26h-34v34h-26zm152 0h60v60h-26v-34h-34zm34 186h26v60h-60v-26h34zm-186 34h34v26h-60v-60h26z' fill='%2393c5fd'/%3E%3Crect x='122' y='196' width='268' height='120' rx='20' fill='none' stroke='%233b82f6' stroke-width='24'/%3E%3Cpath d='M166 220v72M202 220v72M238 220v72M292 220v72M328 220v72' stroke='%2393c5fd' stroke-width='16' stroke-linecap='round'/%3E%3Cpath d='M140 256h232' stroke='%233b82f6' stroke-width='12' stroke-linecap='round'/%3E%3C/svg%3E">
+
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <style>
 body { background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; padding:14px; margin:0; }
@@ -37,7 +46,38 @@ body.scanner-open { overflow:hidden; }
 </style>
 </head>
 <body>
-<h2>Bar Code / NFC</h2>
+<h2 style="display:flex;align-items:center;gap:10px;">
+  <span style="display:inline-flex;width:36px;height:36px;align-items:center;justify-content:center;border-radius:10px;background:#111827;box-shadow:inset 0 0 0 1px rgba(147,197,253,0.18);">
+    <svg viewBox="0 0 64 64" width="24" height="24" aria-hidden="true">
+      <path d="M14 10h10v4h-6v6h-4zm26 0h10v10h-4v-6h-6zm6 30h4v10H40v-4h6zm-32 6h6v4H10V40h4z" fill="#93c5fd"/>
+      <rect x="12" y="22" width="40" height="20" rx="4" fill="none" stroke="#3b82f6" stroke-width="3"/>
+      <path d="M19 26v12M25 26v12M31 26v12M40 26v12M46 26v12" stroke="#93c5fd" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M15 32h34" stroke="#3b82f6" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </span>
+  <span>Bar Code / NFC</span>
+</h2>
+
+
+<div class="card" id="installCard">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+    <span style="display:inline-flex;width:44px;height:44px;align-items:center;justify-content:center;border-radius:12px;background:#111827;box-shadow:inset 0 0 0 1px rgba(147,197,253,0.18);">
+      <svg viewBox="0 0 64 64" width="28" height="28" aria-hidden="true">
+        <path d="M14 10h10v4h-6v6h-4zm26 0h10v10h-4v-6h-6zm6 30h4v10H40v-4h6zm-32 6h6v4H10V40h4z" fill="#93c5fd"/>
+        <rect x="12" y="22" width="40" height="20" rx="4" fill="none" stroke="#3b82f6" stroke-width="3"/>
+        <path d="M19 26v12M25 26v12M31 26v12M40 26v12M46 26v12" stroke="#93c5fd" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M15 32h34" stroke="#3b82f6" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <div>
+      <div style="font-weight:bold;">Install on phone</div>
+      <div class="small">Adds a scanner-style icon to your Android home screen.</div>
+    </div>
+  </div>
+  <button id="installAppBtn" class="success">Install App</button>
+  <button id="copyUrlBtn" class="secondary">Copy URL</button>
+  <div id="installStatus" class="small" style="margin-top:8px;">Open this page in Android Chrome, then tap Install App. If the button stays unavailable, use Chrome menu → Add to Home screen.</div>
+</div>
 
 <div class="card">
   <div>Connection: <span id="connStatus">Not linked</span></div>
@@ -109,6 +149,133 @@ let videoStream = null;
 let scanLoopTimer = null;
 let detector = null;
 const videoEl = document.getElementById("scannerVideo");
+
+let deferredInstallPrompt = null;
+
+function buildManifestUrl() {
+  const manifest = {
+    name: "Bar Code Scanner NFC",
+    short_name: "Scanner NFC",
+    start_url: window.location.href,
+    scope: "./",
+    display: "standalone",
+    background_color: "#0f172a",
+    theme_color: "#0f172a",
+    description: "Barcode scanner and NFC helper for Android phone use.",
+    icons: [
+      {
+        src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='110' fill='%230f172a'/%3E%3Cpath d='M150 118h60v26h-34v34h-26zm152 0h60v60h-26v-34h-34zm34 186h26v60h-60v-26h34zm-186 34h34v26h-60v-60h26z' fill='%2393c5fd'/%3E%3Crect x='122' y='196' width='268' height='120' rx='20' fill='none' stroke='%233b82f6' stroke-width='24'/%3E%3Cpath d='M166 220v72M202 220v72M238 220v72M292 220v72M328 220v72' stroke='%2393c5fd' stroke-width='16' stroke-linecap='round'/%3E%3Cpath d='M140 256h232' stroke='%233b82f6' stroke-width='12' stroke-linecap='round'/%3E%3C/svg%3E",
+        sizes: "512x512",
+        type: "image/svg+xml",
+        purpose: "any maskable"
+      }
+    ]
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
+  const manifestUrl = URL.createObjectURL(blob);
+  let link = document.querySelector('link[rel="manifest"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'manifest';
+    document.head.appendChild(link);
+  }
+  link.href = manifestUrl;
+}
+
+async function registerInlineServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  try {
+    const swCode = `
+      self.addEventListener('install', event => self.skipWaiting());
+      self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
+      self.addEventListener('fetch', () => {});
+    `;
+    const swBlob = new Blob([swCode], { type: 'text/javascript' });
+    const swUrl = URL.createObjectURL(swBlob);
+    await navigator.serviceWorker.register(swUrl);
+  } catch (e) {
+    console.warn('SW registration skipped', e);
+  }
+}
+
+function setInstallStatus(text, cls="") {
+  const el = $("installStatus");
+  if (!el) return;
+  el.className = "small" + (cls ? " " + cls : "");
+  el.innerText = text;
+}
+
+function refreshInstallUi() {
+  const btn = $("installAppBtn");
+  if (!btn) return;
+  const b = browserInfo();
+  const standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  if (standalone || navigator.standalone) {
+    btn.disabled = true;
+    btn.style.opacity = "0.65";
+    btn.style.cursor = "default";
+    setInstallStatus("Already installed or opened in app mode.", "ok");
+    return;
+  }
+  if (!b.isAndroid || !b.isChrome) {
+    btn.disabled = true;
+    btn.style.opacity = "0.65";
+    btn.style.cursor = "default";
+    setInstallStatus("For the best app icon install, open this page in Android Chrome.", "warnText");
+    return;
+  }
+  btn.disabled = false;
+  btn.style.opacity = "1";
+  btn.style.cursor = "pointer";
+  if (deferredInstallPrompt) {
+    setInstallStatus("Install is ready. Tap Install App.", "ok");
+  } else {
+    setInstallStatus("If Chrome does not show the install prompt, use Chrome menu → Add to Home screen.", "warnText");
+  }
+}
+
+async function tryInstallApp() {
+  const b = browserInfo();
+  if (!(b.isAndroid && b.isChrome)) {
+    setInstallStatus("Open this page in Android Chrome first.", "bad");
+    return;
+  }
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    const result = await deferredInstallPrompt.userChoice.catch(() => null);
+    deferredInstallPrompt = null;
+    if (result && result.outcome === 'accepted') {
+      setInstallStatus("Install accepted. The scanner icon should appear on your phone.", "ok");
+    } else {
+      setInstallStatus("Install was dismissed. You can still use Chrome menu → Add to Home screen.", "warnText");
+    }
+    refreshInstallUi();
+    return;
+  }
+  setInstallStatus("Use Chrome menu → Add to Home screen to place the scanner icon on your phone.", "warnText");
+}
+
+async function copyCurrentUrl() {
+  try {
+    await navigator.clipboard.writeText(window.location.href);
+    setInstallStatus("URL copied. Open it in Android Chrome, then install it from there.", "ok");
+  } catch (e) {
+    setInstallStatus("Could not copy automatically. Copy the URL from the address bar.", "warnText");
+  }
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  refreshInstallUi();
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  setInstallStatus("Installed successfully. You can launch it from the new scanner icon.", "ok");
+  refreshInstallUi();
+});
+
 
 function $(id) { return document.getElementById(id); }
 function show(id) { $(id).classList.remove("hidden"); }
@@ -426,8 +593,13 @@ $("manualBarcodeBtn").onclick = () => show("manualBarcodeWrap");
 $("sendManualBarcodeBtn").onclick = () => sendBarcodeResult($("manualBarcodeInput").value);
 $("writeNfcBtn").onclick = writeNfcNow;
 $("stopScannerBtn").onclick = stopScanner;
+$("installAppBtn").onclick = () => tryInstallApp();
+$("copyUrlBtn").onclick = () => copyCurrentUrl();
 
 (function init() {
+  buildManifestUrl();
+  registerInlineServiceWorker();
+  refreshInstallUi();
   refreshDiagnostics();
   const remembered = normalizePcCode(localStorage.getItem("blePhonePcCode") || "");
   if (remembered) rememberPcCode(remembered);
